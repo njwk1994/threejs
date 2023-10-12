@@ -3,9 +3,6 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import * as TWEEN from '@tweenjs/tween.js';
-import { FontLoader } from 'three/addons/loaders/FontLoader.js';
-import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
-
 
 const mainButtons = [
 	{ name: "水平方商业广场", cameraPosition: new THREE.Vector3(409.58,64.37,-295.53), lookAt: new THREE.Vector3(/* x2, y2, z2 */),subButtons: ["餐饮美食", "超市便利", "生活服务", "甜品饮品", "特色推荐"] },
@@ -42,40 +39,27 @@ init();
 render();
 
 function init() {
-
 	const container = document.createElement( 'div' );
 	const backButton = createButton('返回', window.innerHeight - 60);
 	backButton.style.display = 'none';  // Initially hidden
 	document.body.appendChild(backButton);
 	document.body.appendChild( container );
-
 	camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.25, 10000 );
 	camera.position.set( 663.27, 95.65, -262.81 );
-
 	scene = new THREE.Scene();
-
 	new RGBELoader()
 		.setPath( './public/environment/' )
 		.load( 'rustig_koppie_puresky_4k.hdr', function ( texture ) {
-
 			texture.mapping = THREE.EquirectangularReflectionMapping;
-
 			scene.background = texture;
 			scene.environment = texture;
-
 			render();
-
 			// model
-
 			const loader = new GLTFLoader().setPath( './public/model/' );
 			loader.load( '亚东智慧商圈-合.glb', function ( gltf ) {
-
 				scene.add( gltf.scene );
-
 				render();
-
 			} );
-
 		} );
 	renderer = new THREE.WebGLRenderer( { antialias: true } );
 	renderer.setPixelRatio( window.devicePixelRatio );
@@ -85,8 +69,6 @@ function init() {
 	renderer.outputEncoding = THREE.sRGBEncoding;
 	container.appendChild( renderer.domElement );
 	renderer.domElement.addEventListener('click', onClick);
-
-
 	let topPosition = 20;
 	mainButtons.forEach((buttonData, index) => {
 		const button = createButton(buttonData.name, topPosition);
@@ -95,9 +77,6 @@ function init() {
 		});
 		topPosition += 60;
 	});
-
-
-
 	controls = new OrbitControls( camera, renderer.domElement );
 	controls.addEventListener( 'change', render ); // use if there is no animation loop
 	controls.minDistance = 1;
@@ -109,7 +88,6 @@ function init() {
 	mouse = new THREE.Vector2();
 	window.addEventListener( 'resize', onWindowResize );
 	//window.addEventListener('click', onClick, false);
-
 	labelLayer = new THREE.Layers();
 	labelLayer.set(1);
 	backButton.addEventListener('click', function() {
@@ -121,7 +99,6 @@ function init() {
 				if (existingSubButton) document.body.removeChild(existingSubButton);
 			});
 		});
-
 		// Show main buttons
 		mainButtons.forEach((buttonData, index) => {
 			const button = createButton(buttonData.name, 20 + index * 60);
@@ -143,12 +120,10 @@ function animate() {
 function handleMainButtonClick(buttonData, backButton) {
 	animateCameraToPosition(buttonData.cameraPosition, buttonData.lookAt);
 	controls.update();
-
 	mainButtons.forEach(mainButton => {
 		const existingButton = document.querySelector(`div[data-name="${mainButton.name}"]`);
 		if (existingButton) document.body.removeChild(existingButton);
 	});
-
 	if (buttonData.name === "九霄梦天地") {
 		buttonData.subButtons.forEach((subButtonData, subIndex) => {
 			const subButton = createButton(subButtonData.name, 20 + subIndex * 60);
@@ -202,9 +177,7 @@ function handleMainButtonClick(buttonData, backButton) {
 	backButton.style.display = 'block';
 }
 
-
 function onWindowResize() {
-
 	camera.aspect = window.innerWidth / window.innerHeight;
 	camera.updateProjectionMatrix();
 	renderer.setSize( window.innerWidth, window.innerHeight );
@@ -241,9 +214,7 @@ function onClick(event) {
 	console.log("Clicked!"); // 添加这一行来检查点击事件是否被触发
 	mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
 	mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
-
 	raycaster.setFromCamera(mouse, camera);
-
 	const intersects = raycaster.intersectObjects(labelsInScene, true); // 直接检查与labelsInScene中的对象的交集
 	const existingBox = document.querySelector(".detail-box");
 	if (existingBox) {
@@ -337,7 +308,6 @@ function showShops(place, category) {
 	shops.forEach(shop => {
 		const label = createRestaurantLabel(shop.name);
 		const sprite = label.sprite;
-
 		// 如果商铺不在 "康桥圣菲", "亚东商业广场" 和 "水平方商业广场"，则使用optimalPosition
 		if (shop.place !== "康桥圣菲" && shop.place !== "亚东商业广场" && shop.place !== "水平方美食广场") {
 			const optimalPosition = getExtendedSpritePosition(shop.position, scene.children);  // 可能需要根据实际情况更改scene.children为其他对象
@@ -368,7 +338,6 @@ function showShops(place, category) {
 function createRestaurantLabel(name) {
 	const canvas = document.createElement('canvas');
 	const context = canvas.getContext('2d');
-
 	const fontSize = 120; // 将字体大小调整为120px
 	context.font = `${fontSize}px 'Arial'`; // 使用Arial字体
 	context.textBaseline = 'middle'; // 设置文本基线为中心
@@ -409,7 +378,29 @@ function createRestaurantLabel(name) {
 		height: canvas.height
 	};
 }
-// 在main.js的底部，就在最后的闭括号之前，插入以下代码:
+
+CanvasRenderingContext2D.prototype.fillRoundRect = function (x, y, w, h, r) {
+	this.beginPath();
+	this.moveTo(x + r, y);
+	this.arcTo(x + w, y, x + w, y + h, r);
+	this.arcTo(x + w, y + h, x, y + h, r);
+	this.arcTo(x, y + h, x, y, r);
+	this.arcTo(x, y, x + w, y, r);
+	this.closePath();
+	this.fill();
+};
+
+CanvasRenderingContext2D.prototype.strokeRoundRect = function (x, y, w, h, r) {
+	this.beginPath();
+	this.moveTo(x + r, y);
+	this.arcTo(x + w, y, x + w, y + h, r);
+	this.arcTo(x + w, y + h, x, y + h, r);
+	this.arcTo(x, y + h, x, y, r);
+	this.arcTo(x, y, x + w, y, r);
+	this.closePath();
+	this.stroke();
+};
+
 
 function showShopDetails(object) {
 	const detailBox = document.getElementById("shop-detail-popup");
@@ -544,3 +535,4 @@ function getExtendedSpritePosition(shopPosition, sceneObjects) {
 	}
 	return shopPosition;  // 如果没有找到最佳位置，返回原始位置
 }
+
