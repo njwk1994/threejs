@@ -28,12 +28,15 @@ const mainButtons = [
 	{ name: "康桥圣菲", cameraPosition: new THREE.Vector3(372.71,84.12,-222.22),lookAt: new THREE.Vector3(-469.41, 40.18, -181.00), subButtons: ["餐饮美食", "超市便利", "生活服务", "甜品饮品", "特色推荐"] },
 	{ name: "亚东西区", cameraPosition: new THREE.Vector3(-160.75,85,-158.79),lookAt: new THREE.Vector3(-729,45,-4 ), subButtons: ["餐饮美食", "超市便利", "生活服务", "甜品饮品", "特色推荐"] }
 ];
+
 const cameraSettings = {
 	position: new THREE.Vector3(),
 	lookAt: new THREE.Vector3()
 };
 
 let camera, scene, renderer, raycaster, mouse, labelLayer, controls;
+let labelsInScene = [];
+let connectingLines = [];
 
 init();
 render();
@@ -46,6 +49,9 @@ function init() {
 	document.body.appendChild( container );
 	camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.25, 10000 );
 	camera.position.set( 663.27, 95.65, -262.81 );
+	camera.addEventListener('update', function() {
+		refreshLabelsAndLines();
+	});
 	scene = new THREE.Scene();
 	new RGBELoader()
 		.setPath( './public/environment/' )
@@ -177,6 +183,19 @@ function handleMainButtonClick(buttonData, backButton) {
 	backButton.style.display = 'block';
 }
 
+function refreshLabelsAndLines() {
+	labelsInScene.forEach(shop => {
+		const position2D = get2DCoordinates(shop.buttonPosition, camera);
+		const button = document.querySelector(`.shop-button[data-name="${shop.name}"]`);
+
+		if(button) {
+			button.style.left = position2D.x + 'px';
+			button.style.top = position2D.y + 'px';
+		}
+	});
+	updateConnectingLines();
+}
+
 function onWindowResize() {
 	camera.aspect = window.innerWidth / window.innerHeight;
 	camera.updateProjectionMatrix();
@@ -204,14 +223,25 @@ function createButton(text, topPosition) {
 
 function render() {
 	TWEEN.update();
-	renderer.render( scene, camera );
+	renderer.render(scene, camera);
 	const hud = document.getElementById('cameraPosition');
 	hud.textContent = `Camera Position: x=${camera.position.x.toFixed(2)}, y=${camera.position.y.toFixed(2)}, z=${camera.position.z.toFixed(2)}`;
+	updateConnectingLines();
+	// 更新商铺的位置
+	labelsInScene.forEach(shop => {
+		const position2D = get2DCoordinates(shop.position, camera);
+		const button = document.querySelector(`button[data-name="${shop.name}"]`);
+		if (button) {
+			button.style.left = position2D.x + 'px';
+			button.style.top = position2D.y + 'px';
+		}
+	});
 }
-let labelsInScene = [];
+
 
 function onClick(event) {
 	console.log("Clicked!"); // 添加这一行来检查点击事件是否被触发
+	console.log(labelsInScene.length);
 	mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
 	mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
 	raycaster.setFromCamera(mouse, camera);
@@ -223,18 +253,14 @@ function onClick(event) {
 	if (intersects.length > 0) {
 		const intersect = intersects[0];
 		// 检查交集对象是否具有type属性，并且该属性的值为"label"
-		if (intersect.object.userData.type === "label") {
+		if (intersect.object.userData && intersect.object.userData.type === "label") {
 			showShopDetails(intersect.object);
 		}
 	}
 	// If user clicks outside the sprite, remove the detailBox
-	if (!intersects.length || intersects[0].object.userData.type !== "label") {
-		const existingDetailBox = scene.getObjectByName("detailBox");
-		if (existingDetailBox) {
-			scene.remove(existingDetailBox);
-		}
+	else {
+		closeShopDetails();
 	}
-
 }
 
 function animateCameraToPosition(targetPosition, targetLookAt) {
@@ -275,24 +301,18 @@ function animateCameraToPosition(targetPosition, targetLookAt) {
 
 
 function showShops(place, category) {
+	// 清除场景中的标签
 	labelsInScene.forEach(label => {
 		scene.remove(label);
 	});
 	labelsInScene = [];
-
-	const objectsToRemove = [];
-	scene.traverse(child => {
-		if (child.userData && (child.userData.type === "label" || child.userData.type === "line")) {
-			objectsToRemove.push(child);
-		}
-	});
-	objectsToRemove.forEach(obj => scene.remove(obj));
+	const offsetHeight = 1.0;  // 设置偏移高度
+	const offsetAngle = THREE.MathUtils.randFloatSpread(Math.PI / 4);  // 设置偏移角度
+	// 删除现有的HTML按钮
+	const existingButtons = document.querySelectorAll('.shop-button');
+	existingButtons.forEach(button => document.body.removeChild(button));
 
 	const shops = [];
-	const offsetHeight = 10.0;
-	const labels = [];
-	const offsetAngle = THREE.MathUtils.randFloatSpread(Math.PI / 4);
-
 	scene.traverse(child => {
 		if (child.userData && (place === null || child.userData.Place === place) && (category === null || child.userData.Category === category)) {
 			shops.push({
@@ -306,108 +326,85 @@ function showShops(place, category) {
 	});
 
 	shops.forEach(shop => {
-		const label = createRestaurantLabel(shop.name);
-		const sprite = label.sprite;
-		// 如果商铺不在 "康桥圣菲", "亚东商业广场" 和 "水平方商业广场"，则使用optimalPosition
+		const button = createRestaurantLabel(shop.name);
+		let position2D;
+		let spritePosition; // 用于确定连接线的终点位置
+
 		if (shop.place !== "康桥圣菲" && shop.place !== "亚东商业广场" && shop.place !== "水平方美食广场") {
-			const optimalPosition = getExtendedSpritePosition(shop.position, scene.children);  // 可能需要根据实际情况更改scene.children为其他对象
-			sprite.position.copy(optimalPosition);
+			const optimalPosition = getExtendedSpritePosition(shop.position, scene.children);
+			spritePosition = optimalPosition;
 		} else {
 			const direction = new THREE.Vector3(Math.sin(offsetAngle), 1, Math.cos(offsetAngle)).normalize();
-			sprite.position.copy(shop.position);
-			sprite.position.add(direction.multiplyScalar(offsetHeight));
-			sprite.position.y += offsetHeight;
+			spritePosition = shop.position.clone().add(direction.multiplyScalar(offsetHeight)).add(new THREE.Vector3(0, offsetHeight, 0));
 		}
+		position2D = get2DCoordinates(spritePosition, camera);
+		// 在此处调用 drawConnectingLine 函数
+		drawConnectingLine(shop.position, spritePosition);
 
-		sprite.layers = labelLayer;
+		// 存储按钮的3D位置
+		shop.buttonPosition = spritePosition;
 
-		adjustPosition(sprite, labels);
+		button.style.left = position2D.x + 'px';
+		button.style.top = position2D.y + 'px';
+		button.onmouseover = function() {  // 添加mouseover效果
+			button.style.backgroundColor = 'rgba(255, 215, 0, 0.75)';  // 加深背景颜色
+		};
+		button.onmouseout = function() {  // 恢复原始颜色
+			button.style.backgroundColor = 'rgba(255, 215, 0, 0.5)';
+		};
+		button.onclick = function() {
+			showShopDetails(shop);
+		};
 
-		labels.push(sprite);
+		labelsInScene.push(shop);
+	});
+	refreshLabelsAndLines();
+}
 
-		drawConnectingLine(shop.position, sprite.position);
+function get2DCoordinates(position, camera) {
+	const vector = position.project(camera);
+	vector.x = (vector.x + 1) / 2 * window.innerWidth;
+	vector.y = -(vector.y - 1) / 2 * window.innerHeight;
+	return vector;
+}
 
-		sprite.scale.set(6, 4, 2);
-		sprite.userData = { ...shop };
-		labelsInScene.push(sprite);
-		scene.add(sprite);
+
+
+function updateConnectingLines() {
+	connectingLines.forEach(line => {
+		scene.remove(line);
+	});
+	connectingLines = [];
+
+	labelsInScene.forEach(shop => {
+		const line = drawConnectingLine(shop.position, shop.buttonPosition);
+		connectingLines.push(line);
 	});
 }
 
 
-function createRestaurantLabel(name) {
-	const canvas = document.createElement('canvas');
-	const context = canvas.getContext('2d');
-	const fontSize = 120; // 将字体大小调整为120px
-	context.font = `${fontSize}px 'Arial'`; // 使用Arial字体
-	context.textBaseline = 'middle'; // 设置文本基线为中心
-	context.textAlign = 'center';    // 设置文本居中
-	const textWidth = context.measureText(name).width;
-
-	const padding = 40;  // 增大内边距
-	canvas.width = textWidth + 2 * padding;
-	canvas.height = fontSize + 2 * padding;
-
-	const borderRadius = 25;
-
-	// 创建背景渐变
-	const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-	gradient.addColorStop(0, '#3e3e3e');
-	gradient.addColorStop(1, '#2a2a2a');
-	context.fillStyle = gradient;
-	context.fillRoundRect(0, 0, canvas.width, canvas.height, borderRadius);
-
-	// 绘制边框
-	context.strokeStyle = '#f3cf44';
-	context.lineWidth = 4;
-	context.strokeRoundRect(0, 0, canvas.width, canvas.height, borderRadius);
-
-	// 绘制文字
-	context.fillStyle = '#f3cf44';
-	context.fillText(name, canvas.width / 2, canvas.height / 2); // 调整为canvas的中心
-
-	const texture = new THREE.CanvasTexture(canvas);
-	texture.transparent = true;
-	const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
-	const sprite = new THREE.Sprite(spriteMaterial);
-	sprite.userData.type = "label";
-
-	return {
-		sprite: sprite,
-		width: canvas.width,
-		height: canvas.height
-	};
+function createRestaurantLabel(shopName) {
+	const button = document.createElement('button');
+	button.innerText = shopName;
+	button.className = 'shop-button'; // 为了后续方便地选择和删除
+	button.style.position = 'absolute';
+	button.style.padding = '10px 20px';
+	button.style.backgroundColor = 'rgba(255, 215, 0, 0.5)'; // 淡金色透明背景
+	button.style.color = 'white';
+	button.style.borderRadius = '5px';
+	button.style.cursor = 'pointer';
+	button.style.zIndex = 100; // 确保按钮位于页面的顶部
+	document.body.appendChild(button);
+	button.setAttribute('data-name', shopName);
+	return button;
 }
-
-CanvasRenderingContext2D.prototype.fillRoundRect = function (x, y, w, h, r) {
-	this.beginPath();
-	this.moveTo(x + r, y);
-	this.arcTo(x + w, y, x + w, y + h, r);
-	this.arcTo(x + w, y + h, x, y + h, r);
-	this.arcTo(x, y + h, x, y, r);
-	this.arcTo(x, y, x + w, y, r);
-	this.closePath();
-	this.fill();
-};
-
-CanvasRenderingContext2D.prototype.strokeRoundRect = function (x, y, w, h, r) {
-	this.beginPath();
-	this.moveTo(x + r, y);
-	this.arcTo(x + w, y, x + w, y + h, r);
-	this.arcTo(x + w, y + h, x, y + h, r);
-	this.arcTo(x, y + h, x, y, r);
-	this.arcTo(x, y, x + w, y, r);
-	this.closePath();
-	this.stroke();
-};
 
 
 function showShopDetails(object) {
 	const detailBox = document.getElementById("shop-detail-popup");
-
 	// 更新内容
-	document.getElementById("shop-name").textContent = object.userData.Name || "未知名称";
-	document.getElementById("shop-address").textContent = "商店地址: " + (object.userData.Location || "未知地址");
+	document.getElementById("shop-name").textContent = object.name || "未知名称";
+	document.getElementById("shop-address").textContent = "商店地址: " + (object.location || "未知地址");
 
 	// 设定弹窗的位置
 	const rect = renderer.domElement.getBoundingClientRect();
@@ -428,81 +425,27 @@ function closeShopDetails() {
 }
 window.closeShopDetails = closeShopDetails;
 
-// 检查标签是否与其他标签重叠并进行调整
-function adjustPosition(sprite, existingLabels) {
-
-	const padding = 0.05;
-	let isOverlapping = false;
-
-	do {
-		isOverlapping = false;
-
-		for (let existingSprite of existingLabels) {
-			if (areSpritesOverlapping(sprite, existingSprite)) {
-				sprite.position.y += padding;  // 向上移动标签
-				isOverlapping = true;
-				break;
-			}
-		}
-	} while (isOverlapping);
-}
-
-// 判断两个sprite是否重叠
-function areSpritesOverlapping(sprite1, sprite2) {
-	// 假设您有一个函数来获取sprite的边界
-	const bounds1 = getSpriteBounds(sprite1);
-	const bounds2 = getSpriteBounds(sprite2);
-
-	return !(bounds1.right < bounds2.left ||
-		bounds1.left > bounds2.right ||
-		bounds1.top < bounds2.bottom ||
-		bounds1.bottom > bounds2.top);
-}
-
 // 绘制从点A到点B的线
 function drawConnectingLine(pointA, pointB) {
-	const d = 5; // 这是拐点距离文本框的距离，可以根据需要调整
-	let elbowPos;  // 拐点的位置
-
-	// 根据pointA和pointB的相对位置来确定拐点的位置
-	if (pointA.x < pointB.x) {
-		elbowPos = new THREE.Vector3(pointB.x - d, pointB.y, pointB.z);
+	const direction = new THREE.Vector3().subVectors(pointB, pointA).normalize();
+	const buttonWidth = 80; // 根据实际的按钮宽度调整
+	if (direction.x > 0) {
+		pointB.x -= buttonWidth / 2;
 	} else {
-		elbowPos = new THREE.Vector3(pointB.x + d, pointB.y, pointB.z);
+		pointB.x += buttonWidth / 2;
 	}
-
-	// 创建线段材料
 	const lineMaterial = new THREE.LineBasicMaterial({
 		color: 0xFFFFFF,
 		linewidth: 0.5
 	});
-
-	// 从pointA到拐点的线段
-	const geometry1 = new THREE.BufferGeometry().setFromPoints([pointA, elbowPos]);
-	const line1 = new THREE.Line(geometry1, lineMaterial);
-	line1.userData.type = "line";
-	line1.layers.set(1);
-	scene.add(line1);
-
-	// 从拐点到pointB的线段
-	const geometry2 = new THREE.BufferGeometry().setFromPoints([elbowPos, pointB]);
-	const line2 = new THREE.Line(geometry2, lineMaterial);
-	line2.userData.type = "line";
-	line2.layers.set(1);
-	scene.add(line2);
+	const geometry = new THREE.BufferGeometry().setFromPoints([pointA, pointB]);
+	const line = new THREE.Line(geometry, lineMaterial);
+	line.layers.set(1);
+	scene.add(line);
+	return line;
 }
 
 
-function getSpriteBounds(sprite) {
-	const halfSize = 0.5; // 假设sprite的大小为1x1
-	const position = sprite.position;
-	return {
-		left: position.x - halfSize,
-		right: position.x + halfSize,
-		top: position.y + halfSize,
-		bottom: position.y - halfSize
-	};
-}
 
 function getExtendedSpritePosition(shopPosition, sceneObjects) {
 	const raycaster = new THREE.Raycaster();
